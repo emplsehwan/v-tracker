@@ -1,0 +1,490 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <title>V-Tracker (High Quality Edition)</title>
+  <style>
+    body { margin: 0; overflow: hidden; background: #050507; user-select: none; font-family: 'Segoe UI', Tahoma, sans-serif; }
+    
+    /* 동적 크로스헤어 */
+    #crosshair { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); pointer-events: none; z-index: 10; transition: transform 0.05s ease-out; }
+    .ch-dot { width: 6px; height: 6px; background: #00ffcc; border-radius: 50%; box-shadow: 0 0 5px rgba(0,255,204,0.8); }
+    .firing { transform: translate(-50%, -50%) scale(1.8) !important; } /* 사격 시 반동으로 커짐 */
+
+    #hit-marker { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 30px; height: 30px; pointer-events: none; z-index: 9; opacity: 0; transition: opacity 0.1s; }
+    #hit-marker::before, #hit-marker::after { content: ''; position: absolute; top: 14px; left: 0; width: 30px; height: 2px; background: #fff; box-shadow: 0 0 8px #ff4655; }
+    #hit-marker::before { transform: rotate(45deg); }
+    #hit-marker::after { transform: rotate(-45deg); }
+
+    /* 저격 스코프 */
+    #sniper-scope { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: radial-gradient(circle, rgba(0,0,0,0) 15%, rgba(0,0,0,0.98) 50%); border: 2px solid #000; display: none; pointer-events: none; z-index: 8; }
+    #sniper-scope::before { content: ''; position: absolute; top: 50%; left: 0; width: 100%; height: 1px; background: rgba(255,50,50,0.6); }
+    #sniper-scope::after { content: ''; position: absolute; top: 0; left: 50%; width: 1px; height: 100%; background: rgba(255,50,50,0.6); }
+    #scope-dot { position: absolute; top: 50%; left: 50%; width: 4px; height: 4px; background: #ff4655; transform: translate(-50%, -50%); border-radius: 50%; box-shadow: 0 0 10px #ff4655; }
+
+    /* 인게임 HUD */
+    #hud { position: absolute; top: 20px; left: 50%; transform: translateX(-50%); display: flex; gap: 40px; color: #fff; font-size: 22px; font-weight: bold; background: rgba(10,10,15,0.8); padding: 12px 40px; border-radius: 12px; border: 1px solid #333; pointer-events: none; z-index: 5; box-shadow: 0 4px 15px rgba(0,0,0,0.5); }
+    .hud-label { font-size: 12px; color: #ff4655; text-transform: uppercase; margin-bottom: 4px; text-align: center; letter-spacing: 1px; }
+
+    /* 일시정지 & 메인 메뉴 UI */
+    #pause-overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(5,5,8,0.85); backdrop-filter: blur(8px); display: flex; flex-direction: column; justify-content: center; align-items: center; color: white; z-index: 20; }
+    #pause-menu { background: rgba(20,20,25,0.95); padding: 40px; border-radius: 12px; border: 1px solid #333; box-shadow: 0 10px 30px rgba(0,0,0,0.8); width: 320px; text-align: center; }
+    #pause-menu h1 { font-size: 32px; color: #fff; margin: 0 0 5px 0; text-transform: uppercase; letter-spacing: 2px; }
+    #pause-menu h2 { font-size: 14px; color: #ff4655; margin: 0 0 25px 0; font-weight: normal; }
+    
+    .setting-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; font-size: 14px; color: #aaa; text-align: left; }
+    .setting-row select, .setting-row input { width: 130px; background: #111; border: 1px solid #444; color: #00ffcc; text-align: center; border-radius: 4px; padding: 6px; font-size: 14px; outline: none; }
+    .setting-row select:focus, .setting-row input:focus { border-color: #ff4655; }
+    
+    .btn { width: 100%; background: #ff4655; border: none; color: white; padding: 12px; border-radius: 6px; font-size: 16px; font-weight: bold; cursor: pointer; margin-top: 20px; transition: 0.2s; text-transform: uppercase; letter-spacing: 1px; }
+    .btn:hover { background: #ff5f6d; transform: translateY(-2px); box-shadow: 0 5px 15px rgba(255, 70, 85, 0.4); }
+    .btn-outline { background: transparent; border: 1px solid #555; color: #fff; margin-top: 10px; }
+    .btn-outline:hover { background: #333; border-color: #fff; transform: none; box-shadow: none; }
+  </style>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+</head>
+<body>
+  <div id="crosshair" class="ch-dot"></div>
+  <div id="hit-marker"></div>
+  <div id="sniper-scope"><div id="scope-dot"></div></div>
+
+  <div id="hud">
+    <div><div class="hud-label">Time</div><span id="timer">60</span></div>
+    <div><div class="hud-label">Score</div><span id="score">0</span></div>
+    <div><div class="hud-label">Acc</div><span id="accuracy">100</span>%</div>
+  </div>
+
+  <!-- 메인 및 일시정지 통합 메뉴 -->
+  <div id="pause-overlay">
+    <div id="pause-menu">
+      <h1 id="menu-title">V-TRACKER</h1>
+      <h2 id="menu-subtitle">System Paused</h2>
+      
+      <div class="setting-row">
+        <span>훈련 모드</span>
+        <select id="mode-select">
+          <option value="gridshot">Gridshot</option>
+          <option value="tracking">Tracking (봇)</option>
+        </select>
+      </div>
+      <div class="setting-row">
+        <span>무기 선택</span>
+        <select id="weapon-select">
+          <option value="pistol">Ghost (단발)</option>
+          <option value="vandal">Vandal (연사)</option>
+          <option value="sniper">Operator (저격)</option>
+        </select>
+      </div>
+      <div class="setting-row">
+        <span>인게임 감도</span>
+        <!-- 요청하신 감도 0.5를 기본값으로 세팅 -->
+        <input type="number" id="sens" value="0.5" step="0.01" min="0.01">
+      </div>
+      <div class="setting-row">
+        <span>줌 감도 배수</span>
+        <input type="number" id="zoom-sens" value="1.0" step="0.01" min="0.01">
+      </div>
+      
+      <button class="btn" id="resume-btn">게임 재개 (Resume)</button>
+      <button class="btn btn-outline" id="restart-btn">새 게임 시작 (Restart)</button>
+    </div>
+  </div>
+
+  <script>
+    // --- 오디오 시스템 ---
+    let audioCtx;
+    function initAudio() {
+      if(!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      if(audioCtx.state === 'suspended') audioCtx.resume();
+    }
+    
+    function playSound(type) {
+      if(!audioCtx) return;
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      
+      if(type === 'hit') {
+        osc.type = 'square';
+        osc.frequency.setValueAtTime(800, audioCtx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(100, audioCtx.currentTime + 0.1);
+        gain.gain.setValueAtTime(0.15, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.1);
+        osc.start(); osc.stop(audioCtx.currentTime + 0.1);
+      } else if (type === 'shoot') {
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(150, audioCtx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(40, audioCtx.currentTime + 0.1);
+        gain.gain.setValueAtTime(0.05, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.1);
+        osc.start(); osc.stop(audioCtx.currentTime + 0.1);
+      }
+      osc.connect(gain); gain.connect(audioCtx.destination);
+    }
+
+    // --- 기본 변수 설정 ---
+    const VALORANT_YAW = 0.07 * (Math.PI / 180);
+    const BASE_FOV = 70.53, ZOOM_FOV = 35;
+    let valorantSensitivity = 0.5, zoomMultiplier = 1.0;
+    let currentMode = 'gridshot', currentWeapon = 'pistol', isZoomed = false;
+    let score = 0, shotsFired = 0, shotsHit = 0, timeLeft = 60, isPlaying = false, timerInterval;
+
+    // --- 3D 씬 및 렌더러 설정 ---
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x050508);
+    scene.fog = new THREE.FogExp2(0x050508, 0.025);
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.shadowMap.enabled = true; // 그림자 활성화
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap; // 부드러운 그림자
+    document.body.appendChild(renderer.domElement);
+
+    const camera = new THREE.PerspectiveCamera(BASE_FOV, window.innerWidth/window.innerHeight, 0.1, 1000);
+    const player = new THREE.Group();
+    player.position.set(0, 1.6, 10);
+    player.add(camera);
+    scene.add(player);
+
+    // --- 디테일 업그레이드 무기 모델링 (SF 스타일) ---
+    const gunGroup = new THREE.Group();
+    
+    // 메인 바디
+    const bodyMat = new THREE.MeshStandardMaterial({color: 0x222225, roughness: 0.6, metalness: 0.3});
+    const gunBody = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.16, 0.6), bodyMat);
+    gunBody.position.set(0, -0.05, -0.2);
+    gunBody.castShadow = true;
+    
+    // 총열
+    const barrelMat = new THREE.MeshStandardMaterial({color: 0x111111, roughness: 0.8});
+    const gunBarrel = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 0.4, 16), barrelMat);
+    gunBarrel.rotation.x = Math.PI / 2;
+    gunBarrel.position.set(0, -0.02, -0.6);
+    gunBarrel.castShadow = true;
+
+    // 형광 포인트 (조준기)
+    const sightMat = new THREE.MeshBasicMaterial({color: 0x00ffcc});
+    const gunSight = new THREE.Mesh(new THREE.BoxGeometry(0.015, 0.03, 0.03), sightMat);
+    gunSight.position.set(0, 0.04, -0.3);
+
+    gunGroup.add(gunBody, gunBarrel, gunSight);
+    
+    // Muzzle Flash
+    const flashLight = new THREE.PointLight(0xffcc66, 0, 5);
+    flashLight.position.set(0, -0.02, -0.9);
+    gunGroup.add(flashLight);
+    
+    gunGroup.position.set(0.3, -0.3, -0.4);
+    camera.add(gunGroup);
+    let gunRecoilAnim = 0;
+
+    // --- 조명 (그림자 포함) ---
+    scene.add(new THREE.AmbientLight(0x222233, 0.8));
+    
+    const dirLight = new THREE.DirectionalLight(0xffffff, 1.2);
+    dirLight.position.set(5, 20, 10);
+    dirLight.castShadow = true;
+    dirLight.shadow.mapSize.width = 2048;
+    dirLight.shadow.mapSize.height = 2048;
+    scene.add(dirLight);
+
+    // --- 맵 (고품질 그리드 룸) ---
+    const mapGroup = new THREE.Group();
+    const wallMat = new THREE.MeshStandardMaterial({ color: 0x101016, roughness: 0.9 });
+    
+    const floor = new THREE.Mesh(new THREE.PlaneGeometry(80, 80), wallMat);
+    floor.rotation.x = -Math.PI / 2;
+    floor.receiveShadow = true;
+    mapGroup.add(floor);
+    
+    // 네온 스타일 바닥 그리드
+    const grid = new THREE.GridHelper(80, 80, 0x00ffcc, 0x333344);
+    grid.position.y = 0.02;
+    grid.material.opacity = 0.3;
+    grid.material.transparent = true;
+    mapGroup.add(grid);
+    
+    const backWall = new THREE.Mesh(new THREE.PlaneGeometry(80, 30), wallMat);
+    backWall.position.set(0, 15, -25);
+    backWall.receiveShadow = true;
+    mapGroup.add(backWall);
+    
+    scene.add(mapGroup);
+
+    // --- 파티클 시스템 (폭발 효과) ---
+    const particles = [];
+    const pMat = new THREE.MeshBasicMaterial({ color: 0x00ffff });
+    const pGeo = new THREE.BoxGeometry(0.15, 0.15, 0.15);
+
+    function spawnParticles(pos) {
+      for(let i=0; i<15; i++) {
+        const p = new THREE.Mesh(pGeo, pMat);
+        p.position.copy(pos);
+        // 랜덤 폭발 방향
+        p.velocity = new THREE.Vector3( (Math.random()-0.5)*15, (Math.random()-0.5)*15, (Math.random()-0.5)*15 );
+        p.life = 1.0;
+        scene.add(p);
+        particles.push(p);
+      }
+    }
+
+    function updateParticles(delta) {
+      for(let i = particles.length - 1; i >= 0; i--) {
+        let p = particles[i];
+        p.position.addScaledVector(p.velocity, delta);
+        p.velocity.y -= 20 * delta; // 중력
+        p.life -= delta * 2;
+        p.scale.setScalar(Math.max(0, p.life));
+        if(p.life <= 0) {
+          scene.remove(p);
+          particles.splice(i, 1);
+        }
+      }
+    }
+
+    // --- 타겟 시스템 ---
+    const activeTargets = [];
+    const targetMat = new THREE.MeshStandardMaterial({ color: 0x00ffff, emissive: 0x008888, emissiveIntensity: 0.8, roughness: 0.2 });
+    const targetGeo = new THREE.SphereGeometry(0.6, 32, 32);
+
+    function createTarget() {
+      let target;
+      if (currentMode === 'gridshot') {
+        target = new THREE.Mesh(targetGeo, targetMat);
+        target.position.set((Math.random()-0.5)*24, 2 + Math.random()*6, -20);
+      } else {
+        target = new THREE.Group();
+        const body = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.4, 1.2, 16), targetMat);
+        body.castShadow = true;
+        const head = new THREE.Mesh(new THREE.SphereGeometry(0.35, 16, 16), targetMat);
+        head.position.y = 0.85; head.castShadow = true;
+        target.add(body, head);
+        target.position.set(0, 0.6, -15);
+        target.userData = { speedX: (Math.random() > 0.5 ? 1 : -1) * (6 + Math.random()*4) };
+      }
+      target.castShadow = true;
+      scene.add(target);
+      activeTargets.push(target);
+    }
+
+    function initTargets() {
+      activeTargets.forEach(t => scene.remove(t));
+      activeTargets.length = 0;
+      const count = currentMode === 'gridshot' ? 3 : 1;
+      for(let i=0; i<count; i++) createTarget();
+    }
+
+    // --- 사격 및 타격 로직 ---
+    let isFiring = false;
+    let lastFireTime = 0;
+    
+    function fireWeapon() {
+      if(!isPlaying) return;
+      const now = performance.now();
+      if (currentWeapon === 'vandal' && now - lastFireTime < 100) return;
+      if (currentWeapon !== 'vandal' && now - lastFireTime < 50) return;
+      
+      lastFireTime = now;
+      shotsFired++;
+      playSound('shoot');
+
+      // 크로스헤어 반응형 CSS 애니메이션
+      const ch = document.getElementById('crosshair');
+      ch.classList.add('firing');
+      setTimeout(() => ch.classList.remove('firing'), 50);
+      
+      gunRecoilAnim = currentWeapon === 'sniper' ? 0.5 : 0.2;
+      gunGroup.position.z = -0.2; // 반동
+      flashLight.intensity = 3.0; // 화염 켜기
+
+      if (currentWeapon === 'vandal') {
+        camera.rotation.x += 0.006; 
+        player.rotation.y += (Math.random() - 0.5) * 0.003;
+      }
+
+      const raycaster = new THREE.Raycaster();
+      raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
+      const hits = raycaster.intersectObjects(activeTargets, true);
+
+      if (hits.length > 0) {
+        shotsHit++;
+        score += (currentWeapon === 'sniper' ? 150 : 100);
+        document.getElementById('score').innerText = score;
+        
+        playSound('hit');
+        
+        const hm = document.getElementById('hit-marker');
+        hm.style.opacity = '1';
+        setTimeout(() => hm.style.opacity = '0', 100);
+
+        let hitRoot = hits[0].object;
+        if (hitRoot.parent && hitRoot.parent.type === 'Group') hitRoot = hitRoot.parent;
+        
+        // 맞은 위치에 파티클 생성
+        spawnParticles(hitRoot.position);
+
+        const idx = activeTargets.indexOf(hitRoot);
+        if (idx > -1) {
+          scene.remove(hitRoot);
+          activeTargets.splice(idx, 1);
+          createTarget();
+        }
+      }
+      document.getElementById('accuracy').innerText = Math.round((shotsHit/shotsFired)*100);
+    }
+
+    // --- 마우스 제어 및 줌(저격총) ---
+    document.addEventListener('mousedown', (e) => {
+      if(document.pointerLockElement !== document.body || !isPlaying) return;
+      
+      // 우클릭: 줌 토글 (저격총 전용)
+      if (e.button === 2 && currentWeapon === 'sniper') {
+        isZoomed = !isZoomed;
+        camera.fov = isZoomed ? ZOOM_FOV : BASE_FOV;
+        document.getElementById('sniper-scope').style.display = isZoomed ? 'block' : 'none';
+        document.getElementById('crosshair').style.display = isZoomed ? 'none' : 'block';
+        gunGroup.visible = !isZoomed; // 줌 땡기면 총기 숨김
+        camera.updateProjectionMatrix();
+      }
+      
+      // 좌클릭: 사격 (줌 유무 상관없이 발사됨)
+      if (e.button === 0) {
+        isFiring = true;
+        if(currentWeapon !== 'vandal') fireWeapon(); 
+      }
+    });
+
+    document.addEventListener('mouseup', (e) => { if (e.button === 0) isFiring = false; });
+    document.addEventListener('contextmenu', e => e.preventDefault());
+
+    // 마우스 에임 시점 회전 (감도 동기화 완벽 적용)
+    document.addEventListener('mousemove', (e) => {
+      if (document.pointerLockElement !== document.body) return;
+      // 줌 상태일 경우에만 zoomMultiplier와 FOV 비율을 곱해 줌 감도 완벽 구현
+      const zoomFactor = isZoomed ? (ZOOM_FOV/BASE_FOV) * zoomMultiplier : 1;
+      player.rotation.y -= e.movementX * valorantSensitivity * zoomFactor * VALORANT_YAW;
+      
+      let pitch = camera.rotation.x - e.movementY * valorantSensitivity * zoomFactor * VALORANT_YAW;
+      camera.rotation.x = Math.max(-Math.PI/2 + 0.05, Math.min(Math.PI/2 - 0.05, pitch));
+    });
+
+    // --- UI 및 상태 관리 (ESC 메뉴 구현) ---
+    const pauseMenu = document.getElementById('pause-overlay');
+    
+    document.getElementById('resume-btn').addEventListener('click', () => {
+      initAudio();
+      document.body.requestPointerLock();
+    });
+
+    document.getElementById('restart-btn').addEventListener('click', () => {
+      initAudio();
+      resetGame();
+    });
+
+    // 설정 값 변경 즉시 적용
+    document.getElementById('mode-select').addEventListener('change', e => { currentMode = e.target.value; initTargets(); });
+    document.getElementById('weapon-select').addEventListener('change', e => { 
+      currentWeapon = e.target.value; 
+      if(currentWeapon !== 'sniper' && isZoomed) {
+        // 무기 바꿀 때 강제 줌 해제
+        isZoomed = false; camera.fov = BASE_FOV; 
+        document.getElementById('sniper-scope').style.display = 'none'; 
+        document.getElementById('crosshair').style.display = 'block'; 
+        gunGroup.visible = true; camera.updateProjectionMatrix();
+      }
+    });
+    document.getElementById('sens').addEventListener('input', e => valorantSensitivity = parseFloat(e.target.value) || 0.5);
+    document.getElementById('zoom-sens').addEventListener('input', e => zoomMultiplier = parseFloat(e.target.value) || 1.0);
+
+    // ESC 누를 때 처리
+    document.addEventListener('pointerlockchange', () => {
+      if (document.pointerLockElement === document.body) {
+        pauseMenu.style.display = 'none';
+        if(!isPlaying) startGame();
+      } else {
+        // ESC 눌러서 포인터 락이 풀림 -> 일시정지 메뉴 표시
+        pauseMenu.style.display = 'flex';
+        document.getElementById('menu-subtitle').innerText = "Game Paused";
+        document.getElementById('resume-btn').style.display = 'block';
+        isPlaying = false; 
+        clearInterval(timerInterval); 
+        isFiring = false;
+      }
+    });
+
+    function startGame() {
+      isPlaying = true;
+      if (activeTargets.length === 0) initTargets();
+      timerInterval = setInterval(() => {
+        timeLeft--; document.getElementById('timer').innerText = timeLeft;
+        if(timeLeft <= 0) endGame();
+      }, 1000);
+    }
+
+    function resetGame() {
+      score = 0; shotsFired = 0; shotsHit = 0; timeLeft = 60;
+      document.getElementById('score').innerText = 0;
+      document.getElementById('timer').innerText = 60;
+      document.getElementById('accuracy').innerText = 100;
+      
+      // 줌 초기화
+      isZoomed = false; camera.fov = BASE_FOV; camera.updateProjectionMatrix();
+      document.getElementById('sniper-scope').style.display = 'none';
+      document.getElementById('crosshair').style.display = 'block';
+      gunGroup.visible = true;
+      
+      camera.rotation.x = 0; player.rotation.y = 0; // 시점 중앙화
+      
+      initTargets();
+      document.body.requestPointerLock();
+    }
+
+    function endGame() {
+      document.exitPointerLock();
+      document.getElementById('menu-subtitle').innerText = `최종 점수: ${score}점`;
+      document.getElementById('resume-btn').style.display = 'none'; // 끝났으므로 재개 불가
+    }
+
+    window.addEventListener('resize', () => {
+      camera.aspect = window.innerWidth/window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+
+    // --- 렌더 루프 ---
+    let prevTime = performance.now();
+    function animate() {
+      requestAnimationFrame(animate);
+      const time = performance.now();
+      const delta = (time - prevTime) / 1000;
+
+      if (isPlaying && isFiring && currentWeapon === 'vandal') fireWeapon();
+
+      if (isPlaying && currentMode === 'tracking') {
+        activeTargets.forEach(t => {
+          t.position.x += t.userData.speedX * delta;
+          if(t.position.x > 20 || t.position.x < -20) {
+            t.userData.speedX *= -1;
+            t.position.x = Math.max(-20, Math.min(20, t.position.x));
+          }
+        });
+      }
+
+      updateParticles(delta);
+
+      // 반동 복귀 애니메이션 (총기 끄덕임)
+      if(gunRecoilAnim > 0) {
+        gunRecoilAnim -= 3 * delta;
+        gunGroup.rotation.x = Math.max(0, gunRecoilAnim);
+        gunGroup.position.z += (-0.4 - gunGroup.position.z) * 10 * delta;
+      } else {
+        gunGroup.position.z = -0.4;
+      }
+      flashLight.intensity = Math.max(0, flashLight.intensity - 15 * delta);
+
+      renderer.render(scene, camera);
+      prevTime = time;
+    }
+    animate();
+  </script>
+</body>
+</html>
