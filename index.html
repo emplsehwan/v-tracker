@@ -148,9 +148,9 @@
   </div>
 
   <script>
-    // --- 올바르게 수정된 Firebase DB 실시간 연동 주소 ---
+    // --- 파이어베이스 주소 및 관리자 비밀번호 설정 ---
     const FIREBASE_DB_URL = "https://v-tracker-53f77-default-rtdb.firebaseio.com/";
-    const ADMIN_PIN = "1234"; // 관리자 초기화 비밀번호
+    const ADMIN_PIN = "ty358801#"; // 변경된 관리자 비밀번호
 
     let dbRef = null;
     const syncBadge = document.getElementById('sync-status');
@@ -477,7 +477,7 @@
       });
     }
 
-    // 랭킹 리셋 방지 시스템
+    // 랭킹 리셋 방지 시스템 (새로운 관리자 비밀번호 적용)
     document.getElementById('reset-rank-btn').addEventListener('click', () => {
       const pin = prompt("관리자 전용 기능입니다.\n랭킹판을 초기화하려면 관리자 비밀번호를 입력하세요:");
       if (pin === null) return;
